@@ -1,0 +1,14 @@
+{
+  "name": "Charta",
+  "short_name": "Charta",
+  "description": "Outdoor GPS: topo maps, track recording, waypoints, offline maps.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#14211b",
+  "theme_color": "#14211b",
+  "icons": [
+    { "src": "brand/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "brand/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

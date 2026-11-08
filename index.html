@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14211b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Charta">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="brand/icon-192.png">
+<link rel="apple-touch-icon" href="brand/icon-180.png">
+<title>Charta — Find your way back.</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root {
+    --bg: #14211b; --panel: rgba(20, 33, 27, 0.94); --line: rgba(255,255,255,0.12);
+    --text: #eef3ef; --muted: #9db2a5; --accent: #f08a3c; --rec: #e5484d; --ok: #46a758;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+  #map { position: absolute; inset: 0; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+
+  header { position: absolute; z-index: 1000; top: calc(10px + env(safe-area-inset-top)); left: 10px; right: 10px;
+    display: flex; align-items: center; gap: 8px; pointer-events: none; }
+  header > * { pointer-events: auto; }
+  .brand { display: flex; align-items: center; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 9px 14px; }
+  .brand img { height: 20px; display: block; }
+  .input { width: 100%; background: rgba(255,255,255,.06); border: 1px solid var(--line); border-radius: 9px;
+    padding: 8px 10px; color: var(--text); font: inherit; margin-bottom: 8px; }
+  .note { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+  #offBadge { display: none; background: #3a2a12; color: #ffc58a; font-size: 13px; font-weight: 600; }
+  body.offline #offBadge { display: block; }
+  #dlPanel { position: absolute; z-index: 1050; top: calc(62px + env(safe-area-inset-top)); left: 10px; right: 10px;
+    max-width: 420px; margin: 0 auto; background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 12px 14px; display: none; }
+  #dlPanel.on { display: block; }
+  body.dl #fab, body.dl #stats, body.dl #nav.on { display: none; }
+  .bar { height: 6px; background: rgba(255,255,255,.1); border-radius: 3px; overflow: hidden; margin: 8px 0; }
+  .bar div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  .zr { display: flex; gap: 8px; align-items: center; margin: 4px 0 8px; font-size: 14px; }
+  .zr select { flex: 1; }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .spacer { flex: 1; }
+  .pill { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; }
+  select.pill { appearance: none; color: var(--text); font: inherit; }
+
+  #nav { position: absolute; z-index: 1000; top: calc(62px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+    background: var(--accent); color: #1b1006; border-radius: 12px; padding: 8px 10px 8px 14px; font-weight: 600;
+    display: none; align-items: center; gap: 10px; white-space: nowrap; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
+  #nav.on { display: flex; }
+  #nav button { background: rgba(0,0,0,.15); border: 0; border-radius: 8px; padding: 2px 8px; }
+  #navArrow { display: inline-block; transition: transform .3s; }
+
+  #fab { position: absolute; z-index: 1000; right: 10px; bottom: calc(118px + env(safe-area-inset-bottom));
+    display: flex; flex-direction: column; gap: 8px; }
+  .fab { width: 48px; height: 48px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line);
+    display: grid; place-items: center; }
+  .fab svg { width: 22px; height: 22px; }
+  .fab.active { background: var(--accent); color: #1b1006; border-color: transparent; }
+  .fab.rec { color: var(--rec); }
+  .fab.rec.active { background: var(--rec); color: #fff; }
+  #pauseBtn { display: none; }
+  body.recording #pauseBtn { display: grid; }
+
+  #stats { position: absolute; z-index: 1000; left: 10px; right: 10px; bottom: calc(10px + env(safe-area-inset-bottom));
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    display: grid; grid-template-columns: repeat(5, 1fr); padding: 10px 4px; }
+  .stat { text-align: center; min-width: 0; }
+  .stat .v { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat .u { font-size: 12px; color: var(--muted); margin-left: 2px; }
+  .stat .l { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  #status { position: absolute; left: 0; right: 0; top: -22px; text-align: center; font-size: 12px; color: var(--muted);
+    text-shadow: 0 1px 2px #000; }
+  body.recording #status { color: #ffb4b4; }
+  @media (max-width: 480px) { .stat .v { font-size: 16px; } .stat:nth-child(5) { display: none; }
+    #stats { grid-template-columns: repeat(4, 1fr); } }
+
+  #drawer { position: absolute; z-index: 1100; top: 0; right: 0; bottom: 0; width: min(380px, 100%);
+    background: var(--bg); border-left: 1px solid var(--line); transform: translateX(105%); transition: transform .25s;
+    display: flex; flex-direction: column; padding-top: env(safe-area-inset-top); }
+  #drawer.open { transform: none; }
+  .dhead { display: flex; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--line); gap: 8px; }
+  .dhead h2 { margin: 0; font-size: 17px; flex: 1; }
+  .tabs { display: flex; border-bottom: 1px solid var(--line); }
+  .tabs button { flex: 1; background: none; border: 0; padding: 10px; color: var(--muted); border-bottom: 2px solid transparent; }
+  .tabs button.on { color: var(--text); border-color: var(--accent); }
+  .dbody { flex: 1; overflow-y: auto; padding: 12px 16px 40px; }
+  .tab { display: none; } .tab.on { display: block; }
+  .item { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; }
+  .item .t { font-weight: 600; overflow-wrap: anywhere; }
+  .item .m { color: var(--muted); font-size: 13px; margin: 2px 0 8px; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .btn { background: rgba(255,255,255,.07); border: 1px solid var(--line); border-radius: 9px; padding: 6px 11px; font-size: 13px; }
+  .btn.primary { background: var(--accent); color: #1b1006; border-color: transparent; font-weight: 600; }
+  .btn.danger { color: #ff9b9b; }
+  .btn.on { background: var(--ok); color: #fff; border-color: transparent; }
+  .empty { color: var(--muted); text-align: center; padding: 24px 0; font-size: 14px; }
+  label.set { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--line); gap: 12px; }
+  label.set small { display: block; color: var(--muted); }
+  .section { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; margin: 18px 0 8px; }
+
+  .me { width: 44px; height: 44px; position: relative; }
+  .me .dot { position: absolute; left: 14px; top: 14px; width: 16px; height: 16px; border-radius: 50%;
+    background: #3b82f6; border: 3px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.3); }
+  .me .cone { position: absolute; inset: 0; display: none; }
+  .me.heading .cone { display: block; }
+  .wpt { width: 28px; height: 36px; }
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--bg); color: var(--text); }
+  .leaflet-popup-content { margin: 12px 14px; }
+  .leaflet-container a.leaflet-popup-close-button { color: var(--muted); }
+  .leaflet-control-scale { margin-bottom: calc(96px + env(safe-area-inset-bottom)) !important; }
+  #toast { position: absolute; z-index: 1200; left: 50%; bottom: 140px; transform: translateX(-50%); background: #000c;
+    padding: 8px 14px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.on { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<header>
+  <div class="brand"><img src="brand/charta-wordmark-white.png" alt="Charta"></div>
+  <div id="offBadge" class="pill">Offline</div>
+  <div class="spacer"></div>
+  <select id="layerSel" class="pill" aria-label="Map style">
+    <option value="topo">Topo</option>
+    <option value="street">Street</option>
+    <option value="satellite">Satellite</option>
+  </select>
+  <button id="menuBtn" class="pill" aria-label="Open menu">☰</button>
+</header>
+
+<div id="nav"><span>→</span><span id="navText"></span><span id="navArrow">⬆</span><button id="navStop" aria-label="Stop navigation">✕</button></div>
+
+<div id="dlPanel">
+  <div style="font-weight:600;margin-bottom:4px">Download area for offline use</div>
+  <p class="note" style="margin-bottom:8px">Move and zoom the map so the orange box covers the area you need.</p>
+  <input class="input" id="dlName" placeholder="Area name" maxlength="60">
+  <div class="zr">Zoom <select id="dlZmin" class="pill"></select> to <select id="dlZmax" class="pill"></select></div>
+  <div class="note" id="dlInfo" style="margin:0"></div>
+  <div class="bar" id="dlBar" hidden><div></div></div>
+  <div class="row" style="margin-top:10px"><button class="btn primary" id="dlGo">Download</button><button class="btn" id="dlCancel">Cancel</button></div>
+</div>
+
+<div id="fab">
+  <button class="fab" id="locBtn" title="My location / follow">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+  </button>
+  <button class="fab" id="markBtn" title="Mark waypoint here">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg>
+  </button>
+  <button class="fab" id="pauseBtn" title="Pause / resume">
+    <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+  </button>
+  <button class="fab rec" id="recBtn" title="Start / stop recording">
+    <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="7"/></svg>
+  </button>
+</div>
+
+<div id="stats">
+  <div id="status">Tap ◎ to find your location · right-click / long-press map to drop a waypoint</div>
+  <div class="stat"><div><span class="v" id="sDist">0</span><span class="u" id="uDist">m</span></div><div class="l">Distance</div></div>
+  <div class="stat"><div><span class="v" id="sTime">0:00</span></div><div class="l">Time</div></div>
+  <div class="stat"><div><span class="v" id="sSpeed">–</span><span class="u" id="uSpeed">km/h</span></div><div class="l">Speed</div></div>
+  <div class="stat"><div><span class="v" id="sEle">–</span><span class="u" id="uEle"></span></div><div class="l">Altitude</div></div>
+  <div class="stat"><div><span class="v" id="sGain">0</span><span class="u" id="uGain">m</span></div><div class="l">Ascent</div></div>
+</div>
+
+<aside id="drawer" aria-label="Charta menu">
+  <div class="dhead"><h2><img src="brand/charta-wordmark-white.png" alt="Charta" style="height:18px;display:block"></h2><button class="btn" id="closeBtn">Close</button></div>
+  <div class="tabs">
+    <button data-tab="tracks" class="on">Tracks</button>
+    <button data-tab="wpts">Waypoints</button>
+    <button data-tab="offline">Offline</button>
+    <button data-tab="settings">Settings</button>
+  </div>
+  <div class="dbody">
+    <div class="tab on" id="tab-tracks">
+      <div class="row" style="margin-bottom:12px">
+        <button class="btn primary" id="importBtn">Import GPX</button>
+        <button class="btn" id="exportAllBtn">Export all</button>
+      </div>
+      <div id="trackList"></div>
+    </div>
+    <div class="tab" id="tab-wpts">
+      <div class="row" style="margin-bottom:12px">
+        <button class="btn" id="exportWptBtn">Export waypoints GPX</button>
+      </div>
+      <div id="wptList"></div>
+    </div>
+    <div class="tab" id="tab-offline">
+      <p class="note">Charta already keeps the map tiles you look at (the most recent 4,000), so places you've viewed still show without a signal. To save a whole area ahead of a trip, use <b>Download area</b>.</p>
+      <p class="note" id="offLayerNote"></p>
+      <div class="row" style="margin-bottom:12px"><button class="btn primary" id="dlAreaBtn">Download area…</button></div>
+      <div class="section">Saved areas</div>
+      <div id="areaList"></div>
+      <div class="section">Storage</div>
+      <p class="note" id="storageInfo">…</p>
+      <button class="btn" id="clearPassiveBtn">Clear viewed-tile cache</button>
+    </div>
+    <div class="tab" id="tab-settings">
+      <label class="set"><span>Units<small>Distance, speed and altitude</small></span>
+        <select id="unitSel" class="pill"><option value="metric">Metric</option><option value="imperial">Imperial</option></select></label>
+      <label class="set"><span>Simulate GPS<small>Fake a walk from the map centre (for testing on desktop)</small></span>
+        <input type="checkbox" id="simChk"></label>
+      <label class="set"><span>Keep screen on while recording<small>Uses the Wake Lock API where supported</small></span>
+        <input type="checkbox" id="wakeChk" checked></label>
+      <div class="section">My tiles (offline downloads)</div>
+      <p class="note">Area downloads use your own tile source: a tile server you host, or a provider plan whose terms allow offline caching. The free community maps (OpenStreetMap, OpenTopoMap, Esri) don't allow bulk downloads, so Charta only caches what you view from them. Put <code>{z}</code>, <code>{x}</code>, <code>{y}</code> (and optionally <code>{s}</code>) in the URL.</p>
+      <input class="input" id="cUrl" placeholder="https://tiles.example.com/{z}/{x}/{y}.png" spellcheck="false" autocomplete="off">
+      <input class="input" id="cAttr" placeholder="Attribution, e.g. © OpenStreetMap contributors">
+      <div class="zr">Max zoom <input class="input" id="cMax" type="number" min="1" max="22" value="17" style="margin:0;width:90px"></div>
+      <div class="row"><button class="btn primary" id="cSave">Save &amp; use</button><button class="btn danger" id="cRemove">Remove</button></div>
+      <div class="section">About</div>
+      <p style="color:var(--muted);font-size:13px">Charta v0.2 · Find your way back. — maps © OpenStreetMap contributors, OpenTopoMap (CC-BY-SA), Esri. Data is stored only in this browser.</p>
+      <button class="btn danger" id="wipeBtn">Delete all Charta data</button>
+    </div>
+  </div>
+</aside>
+
+<input type="file" id="fileIn" accept=".gpx,application/gpx+xml" multiple hidden>
+<div id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+'use strict';
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const store = {
+  get(k, d) { try { const v = JSON.parse(localStorage.getItem('charta.' + k)); return v ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('charta.' + k, JSON.stringify(v)); } catch (e) { toast('Storage full — export and delete some tracks'); } }
+};
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+function el(tag, props = {}, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) k === 'on' ? Object.entries(v).forEach(([e, f]) => n.addEventListener(e, f)) : (n[k] = v);
+  kids.flat().forEach(c => n.append(c));
+  return n;
+}
+let toastT;
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2200); }
+
+const R = 6371008.8, rad = d => d * Math.PI / 180, deg = r => r * 180 / Math.PI;
+function haversine(a, b) {
+  const dLat = rad(b[0] - a[0]), dLon = rad(b[1] - a[1]);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a[0])) * Math.cos(rad(b[0])) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function bearing(a, b) {
+  const y = Math.sin(rad(b[1] - a[1])) * Math.cos(rad(b[0]));
+  const x = Math.cos(rad(a[0])) * Math.sin(rad(b[0])) - Math.sin(rad(a[0])) * Math.cos(rad(b[0])) * Math.cos(rad(b[1] - a[1]));
+  return (deg(Math.atan2(y, x)) + 360) % 360;
+}
+const compass = b => ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(b / 45) % 8];
+
+/* ---------- units ---------- */
+let units = store.get('units', 'metric');
+const fmt = {
+  dist(m) {
+    if (units === 'imperial') { const mi = m / 1609.344; return mi < 0.1 ? [Math.round(m * 3.28084), 'ft'] : [mi.toFixed(mi < 10 ? 2 : 1), 'mi']; }
+    return m < 1000 ? [Math.round(m), 'm'] : [(m / 1000).toFixed(m < 10000 ? 2 : 1), 'km'];
+  },
+  ele(m) { return m == null ? ['–', ''] : units === 'imperial' ? [Math.round(m * 3.28084), 'ft'] : [Math.round(m), 'm']; },
+  speed(ms) { return ms == null || isNaN(ms) ? ['–', units === 'imperial' ? 'mph' : 'km/h'] : units === 'imperial' ? [(ms * 2.23694).toFixed(1), 'mph'] : [(ms * 3.6).toFixed(1), 'km/h']; },
+  dur(s) { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+    return h ? `${h}:${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')}` : `${m}:${String(x).padStart(2, '0')}`; },
+  str(pair) { return pair.join(' ').trim(); }
+};
+
+/* ---------- track stats ---------- */
+// Track: { id, name, created, segments: [[ [lat, lon, ele|null, time|null], ... ], ...] }
+function trackStats(track) {
+  let dist = 0, moving = 0, gain = 0, loss = 0, ref = null, minE = Infinity, maxE = -Infinity, t0 = null, t1 = null;
+  for (const seg of track.segments) {
+    for (let i = 0; i < seg.length; i++) {
+      const p = seg[i];
+      if (p[3] != null) { t0 ??= p[3]; t1 = p[3]; }
+      if (p[2] != null) {
+        minE = Math.min(minE, p[2]); maxE = Math.max(maxE, p[2]);
+        // 3 m hysteresis filters out GPS altitude jitter
+        if (ref == null) ref = p[2];
+        else { const d = p[2] - ref; if (d >= 3) { gain += d; ref = p[2]; } else if (d <= -3) { loss -= d; ref = p[2]; } }
+      }
+      if (i) {
+        const q = seg[i - 1], d = haversine(q, p); dist += d;
+        if (p[3] && q[3]) { const dt = (p[3] - q[3]) / 1000; if (dt > 0 && dt < 120 && d / dt > 0.3) moving += dt; }
+      }
+    }
+  }
+  const elapsed = t0 != null ? (t1 - t0) / 1000 : 0;
+  return { dist, moving, elapsed, gain, loss, minE: isFinite(minE) ? minE : null, maxE: isFinite(maxE) ? maxE : null,
+    points: track.segments.reduce((n, s) => n + s.length, 0) };
+}
+
+/* ---------- map ---------- */
+// crossOrigin makes tile responses CORS (not opaque) so the service worker can cache them at their real size.
+const layers = {
+  topo: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { maxZoom: 17, subdomains: 'abc', crossOrigin: 'anonymous',
+    attribution: 'Map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, SRTM | Style © <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)' }),
+  street: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, crossOrigin: 'anonymous',
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' }),
+  satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, crossOrigin: 'anonymous',
+    attribution: 'Imagery © Esri, Maxar, Earthstar Geographics' })
+};
+const escH = s => String(s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c]));
+const makeCustom = c => L.tileLayer(c.url, { maxZoom: c.maxZoom || 17, subdomains: 'abc', crossOrigin: 'anonymous', attribution: escH(c.attribution || '') });
+let custom = store.get('custom', null);
+if (custom?.url) layers.custom = makeCustom(custom);
+function syncLayerOptions() {
+  const sel = $('#layerSel'), opt = sel.querySelector('option[value=custom]');
+  if (layers.custom && !opt) sel.append(el('option', { value: 'custom', textContent: 'My tiles' }));
+  if (!layers.custom && opt) opt.remove();
+  sel.value = curLayer;
+}
+const view = store.get('view', { c: [54.5, -3], z: 6 });
+const map = L.map('map', { zoomControl: false, center: view.c, zoom: view.z, tapHold: true });
+L.control.scale({ position: 'bottomleft', imperial: units === 'imperial', metric: units !== 'imperial' }).addTo(map);
+let curLayer = store.get('layer', 'topo');
+if (!layers[curLayer]) curLayer = 'topo';
+layers[curLayer].addTo(map);
+syncLayerOptions();
+function setLayer(name) {
+  if (layers[curLayer]) map.removeLayer(layers[curLayer]);
+  curLayer = layers[name] ? name : 'topo';
+  layers[curLayer].addTo(map); store.set('layer', curLayer); syncLayerOptions(); renderOffline();
+}
+$('#layerSel').onchange = e => setLayer(e.target.value);
+map.on('moveend', () => store.set('view', { c: [map.getCenter().lat, map.getCenter().lng], z: map.getZoom() }));
+
+/* ---------- state ---------- */
+let tracks = store.get('tracks', []);
+let waypoints = store.get('waypoints', []);
+let current = store.get('current', null);        // track being recorded (survives reloads)
+let paused = store.get('paused', false);
+let pos = null;                                    // latest fix {lat, lon, alt, acc, heading, speed, time}
+let follow = false, target = null, firstFix = true;
+
+const shownLayer = L.layerGroup().addTo(map);
+const shown = new Map();                           // trackId -> polyline
+const wptLayer = L.layerGroup().addTo(map);
+const liveLine = L.polyline([], { color: '#e5484d', weight: 5, opacity: 0.9 }).addTo(map);
+const navLine = L.polyline([], { color: '#f08a3c', weight: 3, dashArray: '6 8' }).addTo(map);
+const accCircle = L.circle([0, 0], { radius: 1, color: '#3b82f6', weight: 1, fillOpacity: 0.12, interactive: false });
+const meIcon = L.divIcon({ className: '', iconSize: [44, 44], iconAnchor: [22, 22],
+  html: '<div class="me"><svg class="cone" viewBox="0 0 44 44"><path d="M22 2 L30 18 L14 18 Z" fill="#3b82f6" opacity=".7"/></svg><div class="dot"></div></div>' });
+const meMarker = L.marker([0, 0], { icon: meIcon, interactive: false, zIndexOffset: 1000 });
+
+const wptIcon = L.divIcon({ className: '', iconSize: [28, 36], iconAnchor: [14, 34], popupAnchor: [0, -30],
+  html: '<svg class="wpt" viewBox="0 0 28 36"><path d="M14 35C14 35 26 20.5 26 13A12 12 0 0 0 2 13C2 20.5 14 35 14 35Z" fill="#f08a3c" stroke="#1b1006" stroke-width="1.5"/><circle cx="14" cy="13" r="4.5" fill="#1b1006"/></svg>' });
+
+/* ---------- location ---------- */
+let watchId = null, simTimer = null;
+function startGeo() {
+  if ($('#simChk').checked) return startSim();
+  if (!('geolocation' in navigator)) return toast('This browser has no geolocation');
+  if (watchId != null) return;
+  $('#status').textContent = 'Waiting for GPS…';
+  watchId = navigator.geolocation.watchPosition(p => onPosition({
+    lat: p.coords.latitude, lon: p.coords.longitude, alt: p.coords.altitude, acc: p.coords.accuracy,
+    heading: p.coords.heading, speed: p.coords.speed, time: p.timestamp
+  }), err => {
+    $('#status').textContent = err.code === 1 ? 'Location permission denied — enable it in your browser settings' : 'GPS error: ' + err.message;
+  }, { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
+}
+function stopGeo() {
+  if (watchId != null) navigator.geolocation.clearWatch(watchId), watchId = null;
+  if (simTimer) clearInterval(simTimer), simTimer = null;
+}
+function startSim() {
+  if (simTimer) return;
+  const c = pos ? [pos.lat, pos.lon] : [map.getCenter().lat, map.getCenter().lng];
+  let lat = c[0], lon = c[1], hdg = Math.random() * 360, t = 0;
+  const base = pos?.alt ?? 250;
+  simTimer = setInterval(() => {
+    hdg = (hdg + (Math.random() - 0.5) * 25 + 360) % 360;
+    const v = 1.4 + Math.random() * 0.3;      // walking pace, m/s
+    lat += v * Math.cos(rad(hdg)) / 111320;
+    lon += v * Math.sin(rad(hdg)) / (111320 * Math.cos(rad(lat)));
+    t++;
+    onPosition({ lat, lon, alt: base + 60 * Math.sin(t / 90) + (Math.random() - 0.5) * 2, acc: 4 + Math.random() * 4,
+      heading: hdg, speed: v, time: Date.now() });
+  }, 1000);
+  $('#status').textContent = 'Simulated GPS';
+}
+
+function onPosition(p) {
+  pos = p;
+  const ll = [p.lat, p.lon];
+  if (!map.hasLayer(meMarker)) { meMarker.addTo(map); accCircle.addTo(map); }
+  meMarker.setLatLng(ll); accCircle.setLatLng(ll).setRadius(p.acc || 1);
+  const meEl = meMarker.getElement()?.querySelector('.me');
+  if (meEl) {
+    const hasHdg = p.heading != null && !isNaN(p.heading) && (p.speed ?? 0) > 0.5;
+    meEl.classList.toggle('heading', hasHdg);
+    if (hasHdg) meEl.querySelector('.cone').style.transform = `rotate(${p.heading}deg)`;
+  }
+  if (firstFix) { firstFix = false; map.setView(ll, Math.max(map.getZoom(), 15)); setFollow(true); }
+  else if (follow) map.panTo(ll, { animate: true });
+
+  if (current && !paused) recordPoint(p);
+  if (!$('#simChk').checked || !current) $('#status').textContent = current ? (paused ? 'Recording paused' : '● Recording') :
+    `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)} · ±${Math.round(p.acc)} m${simTimer ? ' · simulated' : ''}`;
+  else $('#status').textContent = paused ? 'Recording paused · simulated' : '● Recording · simulated';
+  updateNav();
+  renderStats();
+}
+
+function setFollow(on) { follow = on; $('#locBtn').classList.toggle('active', on); }
+map.on('dragstart', () => setFollow(false));
+$('#locBtn').onclick = () => {
+  if (watchId == null && !simTimer) { startGeo(); return; }
+  if (pos) { map.setView([pos.lat, pos.lon], Math.max(map.getZoom(), 15)); setFollow(true); }
+};
+
+/* ---------- recording ---------- */
+let lastSave = 0;
+function recordPoint(p) {
+  if (p.acc && p.acc > 50) return;                         // ignore poor fixes
+  const seg = current.segments[current.segments.length - 1];
+  const pt = [+p.lat.toFixed(7), +p.lon.toFixed(7), p.alt != null ? +p.alt.toFixed(1) : null, p.time];
+  const last = seg[seg.length - 1];
+  if (last && haversine(last, pt) < Math.max(3, (p.acc || 0) / 3)) return;  // skip jitter while standing
+  seg.push(pt);
+  liveLine.setLatLngs(current.segments.map(s => s.map(q => [q[0], q[1]])));
+  if (Date.now() - lastSave > 5000) { store.set('current', current); lastSave = Date.now(); }
+}
+let wakeLock = null;
+async function wake(on) {
+  try {
+    if (on && $('#wakeChk').checked && 'wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen');
+    else if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch {}
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && current && !paused) wake(true); });
+
+function startRecording() {
+  current = { id: uid(), name: '', created: Date.now(), segments: [[]] };
+  paused = false;
+  store.set('current', current); store.set('paused', false);
+  if (watchId == null && !simTimer) startGeo();
+  syncRecUI(); wake(true); toast('Recording started');
+}
+function togglePause() {
+  if (!current) return;
+  paused = !paused;
+  if (!paused) current.segments.push([]);                    // new segment after a pause
+  store.set('paused', paused); store.set('current', current);
+  syncRecUI(); wake(!paused); toast(paused ? 'Paused' : 'Resumed');
+}
+function stopRecording() {
+  if (!current) return;
+  current.segments = current.segments.filter(s => s.length);
+  const st = trackStats(current);
+  if (st.points < 2) {
+    if (!confirm('This track has fewer than 2 points. Discard it?')) return;
+    current = null;
+  } else {
+    const def = 'Track ' + new Date(current.created).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+    const name = prompt(`Save track (${fmt.str(fmt.dist(st.dist))}, ${fmt.dur(st.elapsed)}). Name:`, def);
+    if (name === null) { current.segments.push([]); return; }   // cancel = keep recording
+    current.name = name.trim() || def;
+    tracks.unshift(current); store.set('tracks', tracks);
+    toggleShown(current.id, true);
+    toast('Track saved');
+    current = null;
+  }
+  paused = false;
+  localStorage.removeItem('charta.current'); store.set('paused', false);
+  liveLine.setLatLngs([]);
+  syncRecUI(); wake(false); renderLists(); renderStats();
+}
+function syncRecUI() {
+  document.body.classList.toggle('recording', !!current);
+  $('#recBtn').classList.toggle('active', !!current);
+  $('#recBtn').innerHTML = current
+    ? '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="7"/></svg>';
+  $('#pauseBtn').classList.toggle('active', paused);
+  $('#pauseBtn').innerHTML = paused
+    ? '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5l12 7-12 7z"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>';
+}
+$('#recBtn').onclick = () => current ? stopRecording() : startRecording();
+$('#pauseBtn').onclick = togglePause;
+setInterval(() => { if (current) renderStats(); }, 1000);
+
+function renderStats() {
+  const set = (id, pair) => { $('#s' + id).textContent = pair[0]; const u = $('#u' + id); if (u) u.textContent = pair[1]; };
+  if (current) {
+    const st = trackStats(current);
+    set('Dist', fmt.dist(st.dist));
+    $('#sTime').textContent = fmt.dur(paused ? st.elapsed : (Date.now() - current.created) / 1000);
+    set('Gain', fmt.ele(st.gain));
+  } else { set('Dist', fmt.dist(0)); $('#sTime').textContent = '0:00'; set('Gain', fmt.ele(0)); }
+  set('Speed', fmt.speed(pos?.speed));
+  set('Ele', fmt.ele(pos?.alt));
+}
+
+/* ---------- waypoints ---------- */
+function addWaypoint(lat, lon, ele = null, name) {
+  if (name == null) {
+    name = prompt('Waypoint name:', 'Waypoint ' + (waypoints.length + 1));
+    if (name === null) return;
+  }
+  const w = { id: uid(), name: name.trim() || 'Waypoint', lat, lon, ele, time: Date.now() };
+  waypoints.push(w); store.set('waypoints', waypoints);
+  drawWaypoints(); renderLists();
+  return w;
+}
+function drawWaypoints() {
+  wptLayer.clearLayers();
+  for (const w of waypoints) {
+    const m = L.marker([w.lat, w.lon], { icon: wptIcon, title: w.name }).addTo(wptLayer);
+    m.bindPopup(() => {
+      const box = el('div', {},
+        el('div', { className: 't', textContent: w.name, style: 'font-weight:600;margin-bottom:4px' }),
+        el('div', { textContent: `${w.lat.toFixed(5)}, ${w.lon.toFixed(5)}${w.ele != null ? ' · ' + fmt.str(fmt.ele(w.ele)) : ''}`, style: 'color:var(--muted);font-size:13px' }),
+        pos ? el('div', { textContent: `${fmt.str(fmt.dist(haversine([pos.lat, pos.lon], [w.lat, w.lon])))} ${compass(bearing([pos.lat, pos.lon], [w.lat, w.lon]))} of you`, style: 'color:var(--muted);font-size:13px;margin-bottom:8px' }) : '',
+        el('div', { className: 'row', style: 'margin-top:8px' },
+          el('button', { className: 'btn primary', textContent: 'Go to', on: { click: () => { navigateTo(w.id); map.closePopup(); } } }),
+          el('button', { className: 'btn danger', textContent: 'Delete', on: { click: () => { deleteWaypoint(w.id); map.closePopup(); } } })));
+      return box;
+    });
+  }
+}
+function deleteWaypoint(id) {
+  waypoints = waypoints.filter(w => w.id !== id); store.set('waypoints', waypoints);
+  if (target === id) navigateTo(null);
+  drawWaypoints(); renderLists();
+}
+$('#markBtn').onclick = () => {
+  const ll = pos ? [pos.lat, pos.lon, pos.alt] : [map.getCenter().lat, map.getCenter().lng, null];
+  if (!pos) toast('No GPS fix — marking map centre');
+  addWaypoint(ll[0], ll[1], ll[2]);
+};
+map.on('contextmenu', e => addWaypoint(e.latlng.lat, e.latlng.lng));
+
+/* ---------- go-to navigation ---------- */
+function navigateTo(id) {
+  target = id; store.set('target', id);
+  if (id && watchId == null && !simTimer) startGeo();
+  updateNav();
+}
+function updateNav() {
+  const w = waypoints.find(x => x.id === target);
+  if (!w) { $('#nav').classList.remove('on'); navLine.setLatLngs([]); return; }
+  $('#nav').classList.add('on');
+  if (!pos) { $('#navText').textContent = `${w.name} · waiting for GPS`; return; }
+  const a = [pos.lat, pos.lon], b = [w.lat, w.lon], d = haversine(a, b), br = bearing(a, b);
+  $('#navText').textContent = `${w.name} · ${fmt.str(fmt.dist(d))} · ${Math.round(br)}° ${compass(br)}`;
+  const rel = pos.heading != null && (pos.speed ?? 0) > 0.5 ? br - pos.heading : br;   // arrow relative to travel direction
+  $('#navArrow').style.transform = `rotate(${rel}deg)`;
+  navLine.setLatLngs([a, b]);
+  if (d < 15) { toast(`Arrived at ${w.name}`); navigateTo(null); }
+}
+$('#navStop').onclick = () => navigateTo(null);
+
+/* ---------- GPX ---------- */
+const esc = s => String(s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
+const iso = t => new Date(t).toISOString();
+function toGPX({ trks = [], wpts = [] }) {
+  const pt = (tag, p) => `<${tag} lat="${p[0]}" lon="${p[1]}">${p[2] != null ? `<ele>${p[2]}</ele>` : ''}${p[3] ? `<time>${iso(p[3])}</time>` : ''}</${tag}>`;
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Charta" xmlns="http://www.topografix.com/GPX/1/1">
+<metadata><name>Charta export</name><time>${iso(Date.now())}</time></metadata>
+${wpts.map(w => `<wpt lat="${w.lat}" lon="${w.lon}">${w.ele != null ? `<ele>${w.ele}</ele>` : ''}${w.time ? `<time>${iso(w.time)}</time>` : ''}<name>${esc(w.name)}</name></wpt>`).join('\n')}
+${trks.map(t => `<trk><name>${esc(t.name)}</name>\n${t.segments.map(s => `<trkseg>\n${s.map(p => pt('trkpt', p)).join('\n')}\n</trkseg>`).join('\n')}\n</trk>`).join('\n')}
+</gpx>`;
+}
+function download(name, text) {
+  const a = el('a', { href: URL.createObjectURL(new Blob([text], { type: 'application/gpx+xml' })), download: name });
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+const safeName = s => s.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') || 'charta';
+
+function parseGPX(text, fileName) {
+  const doc = new DOMParser().parseFromString(text, 'application/xml');
+  if (doc.querySelector('parsererror')) throw new Error('Not a valid GPX file');
+  const kids = (n, tag) => Array.from(n.getElementsByTagNameNS('*', tag));
+  const txt = (n, tag) => { const c = Array.from(n.children).find(x => x.localName === tag); return c ? c.textContent.trim() : null; };
+  const toPt = n => { const e = txt(n, 'ele'), t = txt(n, 'time');
+    return [+n.getAttribute('lat'), +n.getAttribute('lon'), e != null && e !== '' ? +e : null, t ? Date.parse(t) || null : null]; };
+  const base = fileName.replace(/\.gpx$/i, '');
+  const trks = [];
+  for (const trk of kids(doc, 'trk')) {
+    const segs = kids(trk, 'trkseg').map(s => kids(s, 'trkpt').map(toPt).filter(p => isFinite(p[0]) && isFinite(p[1]))).filter(s => s.length);
+    if (segs.length) trks.push({ id: uid(), name: txt(trk, 'name') || base, created: segs[0][0][3] || Date.now(), segments: segs, imported: true });
+  }
+  for (const rte of kids(doc, 'rte')) {
+    const s = kids(rte, 'rtept').map(toPt).filter(p => isFinite(p[0]));
+    if (s.length) trks.push({ id: uid(), name: (txt(rte, 'name') || base) + ' (route)', created: Date.now(), segments: [s], imported: true });
+  }
+  const wpts = kids(doc, 'wpt').map(n => { const p = toPt(n); return { id: uid(), name: txt(n, 'name') || 'Waypoint', lat: p[0], lon: p[1], ele: p[2], time: p[3] || Date.now() }; })
+    .filter(w => isFinite(w.lat) && isFinite(w.lon));
+  return { trks, wpts };
+}
+$('#importBtn').onclick = () => $('#fileIn').click();
+$('#fileIn').onchange = async e => {
+  let nT = 0, nW = 0; const bounds = L.latLngBounds([]);
+  for (const f of e.target.files) {
+    try {
+      const { trks, wpts } = parseGPX(await f.text(), f.name);
+      tracks.unshift(...trks); waypoints.push(...wpts); nT += trks.length; nW += wpts.length;
+      trks.forEach(t => { toggleShown(t.id, true, false); t.segments.flat().forEach(p => bounds.extend([p[0], p[1]])); });
+      wpts.forEach(w => bounds.extend([w.lat, w.lon]));
+    } catch (err) { toast(`${f.name}: ${err.message}`); }
+  }
+  store.set('tracks', tracks); store.set('waypoints', waypoints);
+  drawWaypoints(); renderLists();
+  if (bounds.isValid()) { setFollow(false); map.fitBounds(bounds, { padding: [40, 40] }); }
+  if (nT || nW) toast(`Imported ${nT} track${nT === 1 ? '' : 's'}, ${nW} waypoint${nW === 1 ? '' : 's'}`);
+  e.target.value = '';
+};
+$('#exportAllBtn').onclick = () => tracks.length || waypoints.length ? download('charta_all.gpx', toGPX({ trks: tracks, wpts: waypoints })) : toast('Nothing to export yet');
+$('#exportWptBtn').onclick = () => waypoints.length ? download('charta_waypoints.gpx', toGPX({ wpts: waypoints })) : toast('No waypoints yet');
+
+/* ---------- saved tracks on map ---------- */
+const palette = ['#2f6fed', '#8e4ec6', '#12a594', '#d6409f', '#0090ff', '#e54d2e'];
+function toggleShown(id, on = !shown.has(id), fit = true) {
+  const t = tracks.find(x => x.id === id); if (!t) return;
+  if (on && !shown.has(id)) {
+    const color = palette[[...id].reduce((a, c) => a + c.charCodeAt(0), 0) % palette.length];
+    const line = L.polyline(t.segments.map(s => s.map(p => [p[0], p[1]])), { color, weight: 4, opacity: 0.85 }).addTo(shownLayer);
+    line.bindTooltip(t.name, { sticky: true });
+    shown.set(id, line);
+    if (fit) { setFollow(false); map.fitBounds(line.getBounds(), { padding: [40, 40] }); }
+  } else if (!on && shown.has(id)) { shownLayer.removeLayer(shown.get(id)); shown.delete(id); }
+  store.set('shown', [...shown.keys()]);
+  renderLists();
+}
+
+/* ---------- drawer lists ---------- */
+function renderLists() {
+  const tl = $('#trackList'); tl.replaceChildren();
+  if (!tracks.length) tl.append(el('div', { className: 'empty', textContent: 'No tracks yet. Press ● to record one, or import a GPX file.' }));
+  for (const t of tracks) {
+    const st = trackStats(t);
+    const meta = [fmt.str(fmt.dist(st.dist)), st.elapsed ? fmt.dur(st.elapsed) : null, st.gain ? '↑ ' + fmt.str(fmt.ele(st.gain)) : null,
+      new Date(t.created).toLocaleDateString()].filter(Boolean).join(' · ');
+    tl.append(el('div', { className: 'item' },
+      el('div', { className: 't', textContent: t.name }),
+      el('div', { className: 'm', textContent: meta }),
+      el('div', { className: 'row' },
+        el('button', { className: 'btn' + (shown.has(t.id) ? ' on' : ''), textContent: shown.has(t.id) ? 'Shown' : 'Show', on: { click: () => toggleShown(t.id) } }),
+        el('button', { className: 'btn', textContent: 'GPX', on: { click: () => download(safeName(t.name) + '.gpx', toGPX({ trks: [t] })) } }),
+        el('button', { className: 'btn', textContent: 'Rename', on: { click: () => { const n = prompt('Track name:', t.name); if (n && n.trim()) { t.name = n.trim(); store.set('tracks', tracks); renderLists(); } } } }),
+        el('button', { className: 'btn danger', textContent: 'Delete', on: { click: () => { if (confirm(`Delete "${t.name}"?`)) { toggleShown(t.id, false); tracks = tracks.filter(x => x.id !== t.id); store.set('tracks', tracks); renderLists(); } } } }))));
+  }
+  const wl = $('#wptList'); wl.replaceChildren();
+  if (!waypoints.length) wl.append(el('div', { className: 'empty', textContent: 'No waypoints yet. Press the flag, or right-click / long-press the map.' }));
+  for (const w of waypoints) {
+    const extra = pos ? ' · ' + fmt.str(fmt.dist(haversine([pos.lat, pos.lon], [w.lat, w.lon]))) + ' away' : '';
+    wl.append(el('div', { className: 'item' },
+      el('div', { className: 't', textContent: w.name }),
+      el('div', { className: 'm', textContent: `${w.lat.toFixed(5)}, ${w.lon.toFixed(5)}${w.ele != null ? ' · ' + fmt.str(fmt.ele(w.ele)) : ''}${extra}` }),
+      el('div', { className: 'row' },
+        el('button', { className: 'btn', textContent: 'View', on: { click: () => { setFollow(false); map.setView([w.lat, w.lon], Math.max(map.getZoom(), 15)); closeDrawer(); } } }),
+        el('button', { className: 'btn primary', textContent: 'Go to', on: { click: () => { navigateTo(w.id); closeDrawer(); } } }),
+        el('button', { className: 'btn danger', textContent: 'Delete', on: { click: () => deleteWaypoint(w.id) } }))));
+  }
+}
+const closeDrawer = () => $('#drawer').classList.remove('open');
+$('#menuBtn').onclick = () => { renderLists(); renderOffline(); $('#drawer').classList.add('open'); };
+$('#closeBtn').onclick = closeDrawer;
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x.id === 'tab-' + b.dataset.tab));
+});
+
+/* ---------- offline maps ---------- */
+const OFFLINE_CACHE = 'charta-offline-v1', PASSIVE_CACHE = 'charta-tiles-v1', MAX_TILES = 30000, EST_KB = 18;
+const OFFLINE_OK = new Set(['custom']);           // layers whose terms allow bulk download
+let areas = store.get('areas', []);
+let dlRect = null, dlAbort = null;
+
+const lon2x = (lon, z) => Math.floor((lon + 180) / 360 * 2 ** z);
+const lat2y = (lat, z) => { const r = rad(Math.max(-85.0511, Math.min(85.0511, lat)));
+  return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * 2 ** z); };
+function tileRange(b, z) {
+  const n = 2 ** z, cl = v => Math.max(0, Math.min(n - 1, v));
+  return { x0: cl(lon2x(b.w, z)), x1: cl(lon2x(b.e, z)), y0: cl(lat2y(b.n, z)), y1: cl(lat2y(b.s, z)) };
+}
+function countTiles(b, zmin, zmax) {
+  let n = 0;
+  for (let z = zmin; z <= zmax; z++) { const r = tileRange(b, z); n += (r.x1 - r.x0 + 1) * (r.y1 - r.y0 + 1); }
+  return n;
+}
+// Must produce exactly the URLs Leaflet requests (same subdomain choice), so cached tiles are found.
+function tileUrls(tpl, subs, b, zmin, zmax) {
+  const out = [];
+  for (let z = zmin; z <= zmax; z++) {
+    const r = tileRange(b, z);
+    for (let x = r.x0; x <= r.x1; x++) for (let y = r.y0; y <= r.y1; y++)
+      out.push(L.Util.template(tpl, { s: subs[Math.abs(x + y) % subs.length], x, y, z, r: '' }));
+  }
+  return out;
+}
+const mb = bytes => (bytes / 1048576).toFixed(bytes < 10485760 ? 1 : 0);
+
+function dlBounds() {
+  const s = map.getSize();
+  const tl = map.containerPointToLatLng([s.x * 0.08, Math.min(s.y * 0.45, 300)]);
+  const br = map.containerPointToLatLng([s.x * 0.92, s.y * 0.9]);
+  return { n: tl.lat, w: tl.lng, s: br.lat, e: br.lng };
+}
+function openDownload() {
+  if (!OFFLINE_OK.has(curLayer)) { toast(layers.custom ? 'Switch to "My tiles" first' : 'Add your own tile source in Settings first'); return; }
+  closeDrawer();
+  document.body.classList.add('dl'); $('#dlPanel').classList.add('on');
+  const max = layers[curLayer].options.maxZoom, z = Math.min(map.getZoom(), max);
+  const opts = n => Array.from({ length: max }, (_, i) => el('option', { value: i + 1, textContent: i + 1, selected: i + 1 === n }));
+  $('#dlZmin').replaceChildren(...opts(Math.max(1, z - 2)));
+  $('#dlZmax').replaceChildren(...opts(Math.min(max, z + 3)));
+  $('#dlName').value = 'Area ' + (areas.length + 1);
+  [$('#dlName'), $('#dlZmin'), $('#dlZmax'), $('#dlGo')].forEach(n => n.disabled = false);
+  $('#dlBar').hidden = true; $('#dlBar').firstElementChild.style.width = '0';
+  setFollow(false);
+  dlRect = L.rectangle([[0, 0], [0, 0]], { color: '#f08a3c', weight: 2, dashArray: '6 6', fillOpacity: 0.08, interactive: false }).addTo(map);
+  map.on('move zoom resize', updateDl); updateDl();
+}
+function updateDl() {
+  const b = dlBounds(); dlRect.setBounds([[b.s, b.w], [b.n, b.e]]);
+  let zmin = +$('#dlZmin').value, zmax = +$('#dlZmax').value;
+  if (zmax < zmin) { $('#dlZmax').value = zmin; zmax = zmin; }
+  const n = countTiles(b, zmin, zmax);
+  const tooBig = n > MAX_TILES;
+  $('#dlInfo').textContent = `${n.toLocaleString()} tiles · about ${mb(n * EST_KB * 1024)} MB` +
+    (tooBig ? ` — too large (max ${MAX_TILES.toLocaleString()}). Zoom in or lower the max zoom.` : '');
+  $('#dlGo').disabled = tooBig;
+}
+$('#dlZmin').onchange = $('#dlZmax').onchange = updateDl;
+function closeDownload() {
+  map.off('move zoom resize', updateDl);
+  if (dlRect) map.removeLayer(dlRect), dlRect = null;
+  document.body.classList.remove('dl'); $('#dlPanel').classList.remove('on');
+}
+$('#dlCancel').onclick = () => dlAbort ? dlAbort.abort() : closeDownload();
+$('#dlAreaBtn').onclick = openDownload;
+
+$('#dlGo').onclick = async () => {
+  const b = dlBounds(), zmin = +$('#dlZmin').value, zmax = +$('#dlZmax').value, layer = layers[curLayer];
+  const subs = layer.options.subdomains || 'abc', tpl = layer._url;
+  const urls = tileUrls(tpl, subs, b, zmin, zmax);
+  if (urls.length > MAX_TILES) return;
+  navigator.storage?.persist?.().catch(() => {});      // ask the browser not to evict downloaded maps
+  map.off('move zoom resize', updateDl);
+  [$('#dlName'), $('#dlZmin'), $('#dlZmax'), $('#dlGo')].forEach(n => n.disabled = true);
+  $('#dlBar').hidden = false;
+  dlAbort = new AbortController(); const signal = dlAbort.signal;
+  const cache = await caches.open(OFFLINE_CACHE);
+  let i = 0, done = 0, failed = 0, bytes = 0;
+  const tick = () => {
+    $('#dlBar').firstElementChild.style.width = ((done + failed) / urls.length * 100) + '%';
+    $('#dlInfo').textContent = `${(done + failed).toLocaleString()} / ${urls.length.toLocaleString()} tiles · ${mb(bytes)} MB` + (failed ? ` · ${failed} failed` : '');
+  };
+  async function worker() {
+    while (i < urls.length && !signal.aborted) {
+      const url = urls[i++];
+      try {
+        const hit = await cache.match(url, { ignoreVary: true });
+        if (hit) { bytes += +(hit.headers.get('content-length') || 0); done++; }
+        else {
+          let res;
+          for (let attempt = 0; attempt < 2 && !res?.ok; attempt++) res = await fetch(url, { mode: 'cors', signal });
+          if (!res.ok) throw new Error(res.status);
+          const blob = await res.blob();
+          bytes += blob.size;
+          await cache.put(url, new Response(blob, { headers: { 'content-type': res.headers.get('content-type') || 'image/png',
+            'content-length': String(blob.size), date: new Date().toUTCString() } }));
+          done++;
+        }
+      } catch { if (signal.aborted) return; failed++; }
+      tick();
+    }
+  }
+  await Promise.all(Array.from({ length: 4 }, worker));     // 4 parallel requests, gentle on the server
+  const aborted = signal.aborted; dlAbort = null;
+  if (done) {
+    areas.unshift({ id: uid(), name: $('#dlName').value.trim() || 'Area', layer: curLayer, tpl, subs, b, zmin, zmax,
+      tiles: done, failed, bytes, created: Date.now(), complete: !aborted && !failed });
+    store.set('areas', areas);
+  }
+  closeDownload();
+  toast(aborted ? `Stopped — ${done} tiles kept` : failed ? `Saved with ${failed} missing tiles` : `Saved "${areas[0]?.name}" for offline use`);
+  renderOffline();
+};
+
+async function deleteArea(id) {
+  const a = areas.find(x => x.id === id); if (!a || !confirm(`Delete offline area "${a.name}"?`)) return;
+  areas = areas.filter(x => x.id !== id); store.set('areas', areas);
+  const keep = new Set(areas.flatMap(o => tileUrls(o.tpl, o.subs, o.b, o.zmin, o.zmax)));   // tiles shared with other areas stay
+  const cache = await caches.open(OFFLINE_CACHE);
+  await Promise.all(tileUrls(a.tpl, a.subs, a.b, a.zmin, a.zmax).filter(u => !keep.has(u)).map(u => cache.delete(u)));
+  renderOffline(); toast('Area deleted');
+}
+
+function renderOffline() {
+  $('#offLayerNote').textContent = OFFLINE_OK.has(curLayer) ? '' : layers.custom
+    ? 'Area downloads use "My tiles". Switch to it in the map style menu.'
+    : 'To download areas, first add your own tile source under Settings → My tiles.';
+  $('#dlAreaBtn').disabled = !OFFLINE_OK.has(curLayer);
+  const list = $('#areaList'); list.replaceChildren();
+  if (!areas.length) list.append(el('div', { className: 'empty', textContent: 'No downloaded areas yet.' }));
+  for (const a of areas) {
+    list.append(el('div', { className: 'item' },
+      el('div', { className: 't', textContent: a.name }),
+      el('div', { className: 'm', textContent: `Zoom ${a.zmin}–${a.zmax} · ${a.tiles.toLocaleString()} tiles · ${mb(a.bytes)} MB · ${new Date(a.created).toLocaleDateString()}${a.complete ? '' : ' · incomplete'}` }),
+      el('div', { className: 'row' },
+        el('button', { className: 'btn', textContent: 'View', on: { click: () => {
+          if (layers[a.layer] && curLayer !== a.layer) setLayer(a.layer);
+          setFollow(false); map.fitBounds([[a.b.s, a.b.w], [a.b.n, a.b.e]]); closeDrawer(); } } }),
+        el('button', { className: 'btn danger', textContent: 'Delete', on: { click: () => deleteArea(a.id) } }))));
+  }
+  renderStorage();
+}
+async function renderStorage() {
+  if (!('caches' in window)) { $('#storageInfo').textContent = 'Offline storage needs HTTPS (or localhost).'; return; }
+  const viewed = (await (await caches.open(PASSIVE_CACHE)).keys()).length;
+  const est = await navigator.storage?.estimate?.().catch(() => null);
+  const persisted = await navigator.storage?.persisted?.().catch(() => false);
+  $('#storageInfo').textContent = `${viewed.toLocaleString()} viewed tiles cached.` +
+    (est ? ` Charta is using ${mb(est.usage || 0)} MB of about ${(est.quota / 1073741824).toFixed(1)} GB available.` : '') +
+    (persisted ? ' Storage is protected from automatic cleanup.' : '');
+}
+$('#clearPassiveBtn').onclick = async () => { await caches.delete(PASSIVE_CACHE); renderStorage(); toast('Viewed-tile cache cleared'); };
+
+/* ---------- custom tile source ---------- */
+if (custom) { $('#cUrl').value = custom.url; $('#cAttr').value = custom.attribution || ''; $('#cMax').value = custom.maxZoom || 17; }
+$('#cSave').onclick = () => {
+  const url = $('#cUrl').value.trim();
+  if (!/^https?:\/\//i.test(url) || !['{z}', '{x}', '{y}'].every(t => url.includes(t))) return toast('URL must start with http(s) and contain {z}, {x} and {y}');
+  const wasCustom = curLayer === 'custom';
+  if (wasCustom) map.removeLayer(layers.custom);
+  custom = { url, attribution: $('#cAttr').value.trim(), maxZoom: Math.min(22, Math.max(1, +$('#cMax').value || 17)) };
+  store.set('custom', custom);
+  layers.custom = makeCustom(custom);
+  if (wasCustom) { curLayer = ''; }
+  setLayer('custom'); toast('Now using My tiles');
+};
+$('#cRemove').onclick = () => {
+  if (!layers.custom) return;
+  if (curLayer === 'custom') { map.removeLayer(layers.custom); curLayer = 'topo'; layers.topo.addTo(map); store.set('layer', 'topo'); }
+  delete layers.custom; custom = null; localStorage.removeItem('charta.custom');
+  $('#cUrl').value = $('#cAttr').value = '';
+  syncLayerOptions(); renderOffline(); toast('Tile source removed (downloaded areas kept)');
+};
+
+/* ---------- settings ---------- */
+$('#unitSel').value = units;
+$('#unitSel').onchange = e => { units = e.target.value; store.set('units', units); renderStats(); renderLists(); updateNav(); };
+$('#simChk').checked = store.get('sim', false);
+$('#simChk').onchange = e => { store.set('sim', e.target.checked); const was = watchId != null || simTimer; stopGeo(); if (was || e.target.checked) startGeo(); };
+$('#wakeChk').checked = store.get('wake', true);
+$('#wakeChk').onchange = e => store.set('wake', e.target.checked);
+$('#wipeBtn').onclick = () => {
+  if (!confirm('Delete ALL tracks, waypoints and settings stored by Charta in this browser? Export first if you want to keep them.')) return;
+  Object.keys(localStorage).filter(k => k.startsWith('charta.')).forEach(k => localStorage.removeItem(k));
+  location.reload();
+};
+
+/* ---------- boot ---------- */
+drawWaypoints();
+store.get('shown', []).forEach(id => toggleShown(id, true, false));
+if (current) { liveLine.setLatLngs(current.segments.map(s => s.map(q => [q[0], q[1]]))); if (!paused) current.segments.push([]); toast('Resumed unfinished recording'); startGeo(); }
+target = store.get('target', null);
+syncRecUI(); renderStats(); renderLists(); updateNav();
+if ($('#simChk').checked) startGeo();
+else navigator.permissions?.query({ name: 'geolocation' }).then(r => { if (r.state === 'granted') startGeo(); }).catch(() => {});
+const syncOnline = () => document.body.classList.toggle('offline', !navigator.onLine);
+window.addEventListener('online', syncOnline); window.addEventListener('offline', syncOnline); syncOnline();
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service worker failed', err));
+renderOffline();
+window.addEventListener('beforeunload', () => { if (current) store.set('current', current); });
+</script>
+</body>
+</html>
