@@ -43,6 +43,14 @@
   .zr { display: flex; gap: 8px; align-items: center; margin: 4px 0 8px; font-size: 14px; }
   .zr select { flex: 1; }
   .btn:disabled { opacity: .45; cursor: default; }
+  #acctBtn { position: relative; display: grid; place-items: center; padding: 8px 10px; }
+  #acctBtn svg { width: 18px; height: 18px; display: block; }
+  #acctBtn .dot { position: absolute; top: 5px; right: 5px; width: 8px; height: 8px; border-radius: 50%; display: none; }
+  #acctBtn.in .dot { display: block; background: var(--ok); }
+  #acctBtn.in.pending .dot { background: var(--accent); }
+  #acctBtn.in.err .dot { background: var(--rec); }
+  .tabs button { padding: 10px 2px; font-size: 14px; }
+  #tab-account a { color: var(--accent); }
   .spacer { flex: 1; }
   .pill { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; }
   select.pill { appearance: none; color: var(--text); font: inherit; }
@@ -129,6 +137,9 @@
     <option value="street">Street</option>
     <option value="satellite">Satellite</option>
   </select>
+  <button id="acctBtn" class="pill" aria-label="Account" title="Account &amp; sync">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg><span class="dot"></span>
+  </button>
   <button id="menuBtn" class="pill" aria-label="Open menu">☰</button>
 </header>
 
@@ -174,6 +185,7 @@
     <button data-tab="tracks" class="on">Tracks</button>
     <button data-tab="wpts">Waypoints</button>
     <button data-tab="offline">Offline</button>
+    <button data-tab="account">Account</button>
     <button data-tab="settings">Settings</button>
   </div>
   <div class="dbody">
@@ -200,6 +212,21 @@
       <p class="note" id="storageInfo">…</p>
       <button class="btn" id="clearPassiveBtn">Clear viewed-tile cache</button>
     </div>
+    <div class="tab" id="tab-account">
+      <div id="acctOut">
+        <p class="note">Charta works fully without an account. Sign in to back up your tracks and waypoints and use them on all your devices. Everything keeps working offline: changes upload automatically when you're back online.</p>
+        <input class="input" id="aEmail" type="email" placeholder="Email" autocomplete="email" spellcheck="false">
+        <input class="input" id="aPass" type="password" placeholder="Password (at least 8 characters)" autocomplete="current-password">
+        <div class="row"><button class="btn primary" id="aSignIn">Sign in</button><button class="btn" id="aSignUp">Create account</button></div>
+        <p class="note" style="margin-top:12px"><a href="#" id="aForgot">Forgot password?</a></p>
+        <p class="note" id="aMsg" role="status"></p>
+      </div>
+      <div id="acctIn" hidden>
+        <div class="item"><div class="m" style="margin:0">Signed in as</div><div class="t" id="aWho"></div></div>
+        <p class="note" id="aSync" role="status"></p>
+        <div class="row"><button class="btn primary" id="aSyncNow">Sync now</button><button class="btn danger" id="aSignOut">Sign out</button></div>
+      </div>
+    </div>
     <div class="tab" id="tab-settings">
       <label class="set"><span>Units<small>Distance, speed and altitude</small></span>
         <select id="unitSel" class="pill"><option value="metric">Metric</option><option value="imperial">Imperial</option></select></label>
@@ -224,6 +251,7 @@
 <div id="toast"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.min.js"></script>
 <script>
 'use strict';
 /* ---------- helpers ---------- */
@@ -461,7 +489,7 @@ function stopRecording() {
     const name = prompt(`Save track (${fmt.str(fmt.dist(st.dist))}, ${fmt.dur(st.elapsed)}). Name:`, def);
     if (name === null) { current.segments.push([]); return; }   // cancel = keep recording
     current.name = name.trim() || def;
-    tracks.unshift(current); store.set('tracks', tracks);
+    tracks.unshift(current); store.set('tracks', tracks); touched('track', current);
     toggleShown(current.id, true);
     toast('Track saved');
     current = null;
@@ -505,7 +533,7 @@ function addWaypoint(lat, lon, ele = null, name) {
     if (name === null) return;
   }
   const w = { id: uid(), name: name.trim() || 'Waypoint', lat, lon, ele, time: Date.now() };
-  waypoints.push(w); store.set('waypoints', waypoints);
+  waypoints.push(w); store.set('waypoints', waypoints); touched('waypoint', w);
   drawWaypoints(); renderLists();
   return w;
 }
@@ -526,7 +554,7 @@ function drawWaypoints() {
   }
 }
 function deleteWaypoint(id) {
-  waypoints = waypoints.filter(w => w.id !== id); store.set('waypoints', waypoints);
+  waypoints = waypoints.filter(w => w.id !== id); store.set('waypoints', waypoints); removed('waypoint', id);
   if (target === id) navigateTo(null);
   drawWaypoints(); renderLists();
 }
@@ -603,6 +631,7 @@ $('#fileIn').onchange = async e => {
     try {
       const { trks, wpts } = parseGPX(await f.text(), f.name);
       tracks.unshift(...trks); waypoints.push(...wpts); nT += trks.length; nW += wpts.length;
+      trks.forEach(t => touched('track', t)); wpts.forEach(w => touched('waypoint', w));
       trks.forEach(t => { toggleShown(t.id, true, false); t.segments.flat().forEach(p => bounds.extend([p[0], p[1]])); });
       wpts.forEach(w => bounds.extend([w.lat, w.lon]));
     } catch (err) { toast(`${f.name}: ${err.message}`); }
@@ -645,8 +674,8 @@ function renderLists() {
       el('div', { className: 'row' },
         el('button', { className: 'btn' + (shown.has(t.id) ? ' on' : ''), textContent: shown.has(t.id) ? 'Shown' : 'Show', on: { click: () => toggleShown(t.id) } }),
         el('button', { className: 'btn', textContent: 'GPX', on: { click: () => download(safeName(t.name) + '.gpx', toGPX({ trks: [t] })) } }),
-        el('button', { className: 'btn', textContent: 'Rename', on: { click: () => { const n = prompt('Track name:', t.name); if (n && n.trim()) { t.name = n.trim(); store.set('tracks', tracks); renderLists(); } } } }),
-        el('button', { className: 'btn danger', textContent: 'Delete', on: { click: () => { if (confirm(`Delete "${t.name}"?`)) { toggleShown(t.id, false); tracks = tracks.filter(x => x.id !== t.id); store.set('tracks', tracks); renderLists(); } } } }))));
+        el('button', { className: 'btn', textContent: 'Rename', on: { click: () => { const n = prompt('Track name:', t.name); if (n && n.trim()) { t.name = n.trim(); store.set('tracks', tracks); touched('track', t); renderLists(); } } } }),
+        el('button', { className: 'btn danger', textContent: 'Delete', on: { click: () => { if (confirm(`Delete "${t.name}"?`)) { toggleShown(t.id, false); tracks = tracks.filter(x => x.id !== t.id); store.set('tracks', tracks); removed('track', t.id); renderLists(); } } } }))));
   }
   const wl = $('#wptList'); wl.replaceChildren();
   if (!waypoints.length) wl.append(el('div', { className: 'empty', textContent: 'No waypoints yet. Press the flag, or right-click / long-press the map.' }));
@@ -664,10 +693,12 @@ function renderLists() {
 const closeDrawer = () => $('#drawer').classList.remove('open');
 $('#menuBtn').onclick = () => { renderLists(); renderOffline(); $('#drawer').classList.add('open'); };
 $('#closeBtn').onclick = closeDrawer;
-document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
-  document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
-  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x.id === 'tab-' + b.dataset.tab));
-});
+function openTab(name) {
+  document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x.dataset.tab === name));
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x.id === 'tab-' + name));
+}
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => openTab(b.dataset.tab));
+$('#acctBtn').onclick = () => { renderLists(); renderOffline(); renderAccount(); openTab('account'); $('#drawer').classList.add('open'); };
 
 /* ---------- offline maps ---------- */
 const OFFLINE_CACHE = 'charta-offline-v1', PASSIVE_CACHE = 'charta-tiles-v1', MAX_TILES = 30000, EST_KB = 18;
@@ -847,6 +878,195 @@ $('#cRemove').onclick = () => {
   syncLayerOptions(); renderOffline(); toast('Tile source removed (downloaded areas kept)');
 };
 
+/* ---------- account & sync (Supabase) ---------- */
+// Offline-first: this device's copy is always the working copy. Edits are queued in `dirty`
+// and uploaded whenever you're signed in and online; edits from other devices are pulled and
+// merged by last-write-wins on each item's `modified` time. Deletions travel as tombstones.
+const SB_URL = 'https://raqkkgjeaekcfnlsjjhz.supabase.co';
+const SB_KEY = 'sb_publishable_ECTeWgjdGInSgW96c2SCKg_NoS9cEF0';   // publishable key: meant for browsers; row-level security protects the data
+const sb = window.supabase?.createClient(SB_URL, SB_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+let user = null, syncing = false, syncError = null, syncTimer = null;
+let dirty = new Set(store.get('dirty', []));
+let tombs = store.get('tombs', {});                               // id -> { kind, modified }
+const saveSyncState = () => { store.set('dirty', [...dirty]); store.set('tombs', tombs); };
+const modOf = o => o.modified ?? o.created ?? o.time ?? 0;
+
+function touched(kind, obj) { obj.modified = Date.now(); delete tombs[obj.id]; dirty.add(obj.id); saveSyncState(); scheduleSync(); }
+function removed(kind, id) { tombs[id] = { kind, modified: Date.now() }; dirty.add(id); saveSyncState(); scheduleSync(); }
+function scheduleSync(ms = 2000) { clearTimeout(syncTimer); if (user) syncTimer = setTimeout(sync, ms); renderAccount(); }
+
+function localMod(id) {
+  const o = tracks.find(x => x.id === id) || waypoints.find(x => x.id === id);
+  return o ? modOf(o) : tombs[id] ? tombs[id].modified : null;
+}
+// Apply one row from the server if it is newer than what this device has. Returns true if anything changed.
+function merge(r) {
+  const mine = localMod(r.id);
+  if (mine != null && mine >= r.modified) return false;
+  dirty.delete(r.id); delete tombs[r.id];
+  const isTrack = r.kind === 'track';
+  const list = isTrack ? tracks : waypoints;
+  const i = list.findIndex(x => x.id === r.id);
+  if (r.deleted) {
+    if (i < 0) return false;
+    if (isTrack) toggleShown(r.id, false);
+    list.splice(i, 1);
+    return true;
+  }
+  const obj = { ...r.data, id: r.id, modified: r.modified };
+  if (i >= 0) list[i] = obj; else isTrack ? list.unshift(obj) : list.push(obj);
+  if (isTrack && shown.has(r.id)) { toggleShown(r.id, false); toggleShown(r.id, true, false); }
+  return true;
+}
+
+async function sync() {
+  if (!sb || !user || syncing) return;
+  if (!navigator.onLine) { renderAccount(); return; }
+  syncing = true; syncError = null; renderAccount();
+  try {
+    // 1. Pull everything changed on the server since last time (with a 60 s overlap for safety).
+    const since = store.get('cursor', null);
+    let cursor = since, from = 0, changed = false;
+    for (;;) {
+      let q = sb.from('items').select('id,kind,data,deleted,modified,updated_at').order('updated_at').range(from, from + 499);
+      if (since) q = q.gt('updated_at', new Date(Date.parse(since) - 60000).toISOString());
+      const { data, error } = await q;
+      if (error) throw error;
+      for (const r of data) {
+        if (merge(r)) changed = true;
+        if (!cursor || Date.parse(r.updated_at) > Date.parse(cursor)) cursor = r.updated_at;
+      }
+      if (data.length < 500) break;
+      from += 500;
+    }
+    if (changed) {
+      store.set('tracks', tracks); store.set('waypoints', waypoints); saveSyncState();
+      drawWaypoints(); renderLists(); updateNav();
+    }
+    // 2. Push this device's queued changes.
+    const rows = [...dirty].map(id => {
+      const t = tracks.find(x => x.id === id), w = !t && waypoints.find(x => x.id === id), tb = tombs[id];
+      if (t) return { user_id: user.id, id, kind: 'track', data: t, deleted: false, modified: modOf(t) };
+      if (w) return { user_id: user.id, id, kind: 'waypoint', data: w, deleted: false, modified: modOf(w) };
+      if (tb) return { user_id: user.id, id, kind: tb.kind, data: null, deleted: true, modified: tb.modified };
+      dirty.delete(id); return null;
+    }).filter(Boolean);
+    for (let i = 0; i < rows.length; i += 20) {
+      const chunk = rows.slice(i, i + 20);
+      const { error } = await sb.from('items').upsert(chunk, { onConflict: 'user_id,id' });
+      if (error) throw error;
+      for (const r of chunk) if (localMod(r.id) === r.modified || (r.deleted && !tombs[r.id])) { dirty.delete(r.id); if (r.deleted) delete tombs[r.id]; }
+      saveSyncState();
+    }
+    store.set('cursor', cursor); store.set('lastSync', Date.now());
+  } catch (e) {
+    syncError = e?.message || String(e);
+    console.warn('Charta sync failed', e);
+  } finally {
+    syncing = false; renderAccount();
+  }
+  if (dirty.size && !syncError) scheduleSync(1000);       // something changed while we were syncing
+}
+
+// First sign-in on this device backs up what is already here. Signing in as a different
+// account than last time asks before mixing that person's routes into this one.
+function onSignedIn() {
+  const owner = store.get('owner', null);
+  if (owner === user.id) return;
+  if (owner && (tracks.length || waypoints.length) &&
+      !confirm(`This device has routes from a different account. Add them to ${user.email}?\n\nCancel removes them from this device instead.`)) {
+    tracks.forEach(t => toggleShown(t.id, false));
+    tracks = []; waypoints = []; store.set('tracks', tracks); store.set('waypoints', waypoints);
+    drawWaypoints(); renderLists();
+  }
+  dirty = new Set([...tracks, ...waypoints].map(o => o.id)); tombs = {};
+  store.set('owner', user.id); localStorage.removeItem('charta.cursor'); saveSyncState();
+}
+
+const ago = t => { const s = (Date.now() - t) / 1000; return s < 60 ? 'just now' : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : new Date(t).toLocaleDateString(); };
+function renderAccount() {
+  const btn = $('#acctBtn');
+  btn.classList.toggle('in', !!user);
+  btn.classList.toggle('pending', !!user && (dirty.size > 0 || !navigator.onLine));
+  btn.classList.toggle('err', !!user && !!syncError);
+  $('#acctOut').hidden = !!user; $('#acctIn').hidden = !user;
+  if (!sb) { $('#aMsg').textContent = 'Accounts need an internet connection the first time Charta loads. Connect and reload.'; return; }
+  if (!user) return;
+  $('#aWho').textContent = user.email;
+  const n = dirty.size, waiting = n ? ` ${n} change${n === 1 ? '' : 's'} waiting to upload.` : '';
+  const last = store.get('lastSync', null);
+  $('#aSync').textContent = !navigator.onLine ? `Offline. Everything is saved on this device.${waiting} It will sync when you're back online.`
+    : syncing ? 'Syncing…'
+    : syncError ? `Sync failed: ${syncError}. Charta will retry.${waiting}`
+    : (last ? `Synced ${ago(last)}.` : 'Not synced yet.') + waiting;
+  $('#aSyncNow').disabled = syncing || !navigator.onLine;
+}
+
+function authMsg(text) { $('#aMsg').textContent = text; }
+function authInputs() {
+  const email = $('#aEmail').value.trim(), password = $('#aPass').value;
+  if (!/^\S+@\S+\.\S+$/.test(email)) { authMsg('Enter a valid email address.'); return null; }
+  return { email, password };
+}
+const redirectTo = location.origin + location.pathname;
+async function authCall(btn, fn) {
+  if (!sb) return;
+  if (!navigator.onLine) return authMsg('You need to be online to sign in or create an account.');
+  btn.disabled = true;
+  try { await fn(); } catch (e) { authMsg(e?.message || String(e)); } finally { btn.disabled = false; }
+}
+$('#aSignIn').onclick = e => authCall(e.target, async () => {
+  const c = authInputs(); if (!c) return;
+  const { error } = await sb.auth.signInWithPassword(c);
+  if (error) authMsg(error.message === 'Email not confirmed' ? 'Confirm your email first: open the link we sent you, then sign in.' : error.message);
+  else { authMsg(''); $('#aPass').value = ''; toast('Signed in'); }
+});
+$('#aSignUp').onclick = e => authCall(e.target, async () => {
+  const c = authInputs(); if (!c) return;
+  if (c.password.length < 8) return authMsg('Use a password of at least 8 characters.');
+  const { data, error } = await sb.auth.signUp({ ...c, options: { emailRedirectTo: redirectTo } });
+  if (error) return authMsg(error.message);
+  $('#aPass').value = '';
+  authMsg(data.session ? '' : `Account created. We sent a confirmation link to ${c.email}. Open it, then sign in here.`);
+});
+$('#aForgot').onclick = e => { e.preventDefault(); authCall($('#aSignIn'), async () => {
+  const email = $('#aEmail').value.trim();
+  if (!/^\S+@\S+\.\S+$/.test(email)) return authMsg('Type your email above first.');
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo });
+  authMsg(error ? error.message : `If ${email} has an account, a reset link is on its way.`);
+}); };
+$('#aSyncNow').onclick = () => sync();
+$('#aSignOut').onclick = async () => {
+  if (dirty.size && !confirm(`${dirty.size} change(s) haven't uploaded yet and will stay only on this device. Sign out anyway?`)) return;
+  const wipe = confirm('Signed out. Also remove your routes from this device?\n\nOK removes them (they stay in your account). Cancel keeps them here.');
+  await sb.auth.signOut({ scope: 'local' });
+  if (wipe) {
+    tracks.forEach(t => toggleShown(t.id, false));
+    tracks = []; waypoints = []; store.set('tracks', tracks); store.set('waypoints', waypoints);
+    ['owner', 'cursor', 'dirty', 'tombs', 'lastSync'].forEach(k => localStorage.removeItem('charta.' + k));
+    dirty = new Set(); tombs = {};
+    drawWaypoints(); renderLists(); updateNav();
+  }
+  toast('Signed out');
+};
+
+if (sb) sb.auth.onAuthStateChange((event, session) => {
+  user = session?.user ?? null;
+  // Don't call Supabase inside this callback (it can deadlock); defer the work.
+  setTimeout(async () => {
+    if (event === 'PASSWORD_RECOVERY') {
+      const pw = prompt('Choose a new password for Charta (at least 8 characters):');
+      if (pw && pw.length >= 8) { const { error } = await sb.auth.updateUser({ password: pw }); toast(error ? error.message : 'Password updated'); }
+    }
+    if (user && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) { onSignedIn(); sync(); }
+    renderAccount();
+  }, 0);
+});
+window.addEventListener('online', () => { renderAccount(); sync(); });
+window.addEventListener('offline', renderAccount);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sync(); });
+setInterval(sync, 5 * 60 * 1000);
+
 /* ---------- settings ---------- */
 $('#unitSel').value = units;
 $('#unitSel').onchange = e => { units = e.target.value; store.set('units', units); renderStats(); renderLists(); updateNav(); };
@@ -855,7 +1075,7 @@ $('#simChk').onchange = e => { store.set('sim', e.target.checked); const was = w
 $('#wakeChk').checked = store.get('wake', true);
 $('#wakeChk').onchange = e => store.set('wake', e.target.checked);
 $('#wipeBtn').onclick = () => {
-  if (!confirm('Delete ALL tracks, waypoints and settings stored by Charta in this browser? Export first if you want to keep them.')) return;
+  if (!confirm('Delete ALL tracks, waypoints and settings stored by Charta in this browser? Export first if you want to keep them. If you are signed in, your account backup is kept and will download again.')) return;
   Object.keys(localStorage).filter(k => k.startsWith('charta.')).forEach(k => localStorage.removeItem(k));
   location.reload();
 };
@@ -871,7 +1091,7 @@ else navigator.permissions?.query({ name: 'geolocation' }).then(r => { if (r.sta
 const syncOnline = () => document.body.classList.toggle('offline', !navigator.onLine);
 window.addEventListener('online', syncOnline); window.addEventListener('offline', syncOnline); syncOnline();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service worker failed', err));
-renderOffline();
+renderOffline(); renderAccount();
 window.addEventListener('beforeunload', () => { if (current) store.set('current', current); });
 </script>
 </body>

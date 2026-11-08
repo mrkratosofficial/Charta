@@ -1,6 +1,6 @@
 /* Charta service worker: makes the app open offline and serves map tiles from cache. */
 'use strict';
-const SHELL = 'charta-shell-v2';
+const SHELL = 'charta-shell-v3';
 const PASSIVE = 'charta-tiles-v1';     // tiles you have looked at (trimmed to MAX_PASSIVE)
 const OFFLINE = 'charta-offline-v1';   // tiles from "Download area" (never trimmed automatically)
 const MAX_PASSIVE = 4000;
@@ -8,7 +8,8 @@ const REFRESH_AFTER_MS = 7 * 24 * 3600 * 1000;
 const SHELL_URLS = [
   './', './index.html', './manifest.webmanifest', './brand/charta-wordmark-white.png', './brand/icon-192.png',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
+  'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.min.js'
 ];
 const TILE_RE = /\/\d+\/\d+\/\d+(@2x)?(\.(png|jpe?g|webp))?$/i;
 
@@ -29,13 +30,14 @@ self.addEventListener('fetch', e => {
   const url = new URL(req.url);
   if (req.destination === 'image' && TILE_RE.test(url.pathname)) return e.respondWith(tile(e));
   if (url.origin === self.location.origin) return e.respondWith(networkFirst(req));
-  if (url.hostname === 'unpkg.com') return e.respondWith(cacheFirst(req));
+  if (url.hostname === 'unpkg.com' || url.hostname === 'cdn.jsdelivr.net') return e.respondWith(cacheFirst(req));
 });
 
 // App files: always try the network so updates arrive, fall back to cache when offline.
 async function networkFirst(req) {
   try {
-    const res = await fetch(req);
+    // no-cache: always revalidate with the server so new versions arrive straight away
+    const res = await fetch(req, { cache: 'no-cache' });
     if (res.ok) (await caches.open(SHELL)).put(req, res.clone());
     return res;
   } catch {

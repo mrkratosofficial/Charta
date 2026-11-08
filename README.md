@@ -15,7 +15,15 @@ ChartaGPS: an outdoor GPS web app for hiking. It runs in any modern browser and 
   - The app opens with no connection.
   - The last 4,000 viewed tiles are cached.
   - **Download area** saves a region ahead of a trip, from your own tile source (Settings → My tiles).
+- **Accounts & sync (optional)**:
+  - Sign in with email and password to back up your tracks and waypoints and use them on any device.
+  - Works offline first: changes are saved on the device right away and upload when you're back online.
+  - If the same item is edited on two devices, the most recent edit wins.
 - GPS simulator for testing on a computer
+
+## Accounts backend
+
+Accounts and sync use [Supabase](https://supabase.com) (project `Charta`, London region). Everything is stored in one table, `public.items`, with one row per track or waypoint. Row-level security limits each signed-in user to their own rows. The key in `index.html` is Supabase's *publishable* key, which is meant to sit in browser code: it can't read or change anyone's data without signing in as them.
 
 ## Run locally
 
